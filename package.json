@@ -1,7 +1,7 @@
 {
   "name": "api-finance",
   "version": "1.0.0",
-  "description": "API de Análisis Financiero - Analista de Valor Fundamental",
+  "description": "API de Análisis Financiero - Analista de Valor Fundamental con Supabase",
   "author": "Codegen Bot",
   "private": true,
   "license": "MIT",
@@ -17,10 +17,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
-    "migration:generate": "typeorm-ts-node-commonjs migration:generate",
-    "migration:run": "typeorm-ts-node-commonjs migration:run",
-    "migration:revert": "typeorm-ts-node-commonjs migration:revert"
+    "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",
@@ -52,8 +49,8 @@
     "@types/jest": "^29.5.2",
     "@types/node": "^20.3.1",
     "@types/supertest": "^2.0.12",
-    "@types/bcryptjs": "^2.4.6",
     "@types/passport-jwt": "^3.0.13",
+    "@types/uuid": "^9.0.7",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.42.0",
@@ -87,3 +84,4 @@
     "testEnvironment": "node"
   }
 }
+

@@ -1,160 +1,203 @@
 -- =================================
--- API FINANCE DATABASE SCHEMA
+-- API FINANCE SUPABASE SCHEMA
 -- =================================
--- Este archivo contiene las definiciones de tablas para Supabase
--- Ejecutar en el SQL Editor de Supabase Dashboard
+-- Esquema basado en los contratos del README del frontend
 
 -- =================================
 -- ENUMS
 -- =================================
 
--- Enum para tiers de usuario
-CREATE TYPE user_tier AS ENUM ('free', 'premium', 'enterprise');
+-- Enum para planes de usuario
+CREATE TYPE tier_plan AS ENUM ('free', 'pro', 'enterprise');
 
--- Enum para severidad de alertas
-CREATE TYPE alert_severity AS ENUM ('low', 'medium', 'high', 'critical');
+-- Enum para roles de aplicación
+CREATE TYPE app_role AS ENUM ('admin', 'moderator', 'user');
 
--- Enum para roles de usuario
-CREATE TYPE user_role AS ENUM ('user', 'admin', 'analyst');
+-- Enum para mercados
+CREATE TYPE market_type AS ENUM ('US', 'PE', 'GLOBAL');
 
 -- =================================
 -- TABLA: profiles
 -- =================================
--- Extiende la tabla auth.users con información adicional del perfil
+-- Extiende auth.users con información del perfil
 
 CREATE TABLE IF NOT EXISTS public.profiles (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE NOT NULL,
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
     display_name TEXT,
-    tier user_tier DEFAULT 'free' NOT NULL,
-    search_count INTEGER DEFAULT 0 NOT NULL,
-    max_searches INTEGER DEFAULT 5 NOT NULL, -- 5 para free, 100 para premium, ilimitado para enterprise
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    search_count INTEGER DEFAULT 0,
+    tier_plan tier_plan DEFAULT 'free' NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Índices para optimizar consultas
-CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON public.profiles(user_id);
-CREATE INDEX IF NOT EXISTS idx_profiles_tier ON public.profiles(tier);
+-- RLS para profiles
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own profile" ON public.profiles
+    FOR SELECT USING (auth.uid() = id);
+
+CREATE POLICY "Users can update own profile" ON public.profiles
+    FOR UPDATE USING (auth.uid() = id);
+
+-- Índices
+CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);
+CREATE INDEX IF NOT EXISTS idx_profiles_tier_plan ON public.profiles(tier_plan);
 
 -- =================================
 -- TABLA: portfolio
 -- =================================
--- Almacena los activos en la cartera de cada usuario
+-- Cartera de activos por usuario
 
 CREATE TABLE IF NOT EXISTS public.portfolio (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
-    ticker VARCHAR(10) NOT NULL,
-    sector VARCHAR(100),
-    added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-    last_analysis TIMESTAMP WITH TIME ZONE,
+    ticker TEXT NOT NULL,
+    name TEXT NOT NULL,
+    market market_type NOT NULL,
+    sector TEXT,
+    added_at TIMESTAMPTZ DEFAULT NOW(),
     
-    -- Constraint para evitar duplicados por usuario
+    -- Constraint único por usuario y ticker
     UNIQUE(user_id, ticker)
 );
 
--- Índices para optimizar consultas
+-- RLS para portfolio
+ALTER TABLE public.portfolio ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage own portfolio" ON public.portfolio
+    FOR ALL USING (auth.uid() = user_id);
+
+-- Índices
 CREATE INDEX IF NOT EXISTS idx_portfolio_user_id ON public.portfolio(user_id);
 CREATE INDEX IF NOT EXISTS idx_portfolio_ticker ON public.portfolio(ticker);
-CREATE INDEX IF NOT EXISTS idx_portfolio_sector ON public.portfolio(sector);
+CREATE INDEX IF NOT EXISTS idx_portfolio_market ON public.portfolio(market);
+
+-- =================================
+-- TABLA: user_roles
+-- =================================
+-- Roles de seguridad para usuarios
+
+CREATE TABLE IF NOT EXISTS public.user_roles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    role app_role NOT NULL,
+    granted_at TIMESTAMPTZ DEFAULT NOW(),
+    granted_by UUID REFERENCES auth.users(id),
+    
+    -- Constraint único por usuario y rol
+    UNIQUE(user_id, role)
+);
+
+-- RLS para user_roles
+ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own roles" ON public.user_roles
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Admins can manage all roles" ON public.user_roles
+    FOR ALL USING (
+        EXISTS (
+            SELECT 1 FROM public.user_roles 
+            WHERE user_id = auth.uid() AND role = 'admin'
+        )
+    );
+
+-- Índices
+CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON public.user_roles(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_roles_role ON public.user_roles(role);
 
 -- =================================
 -- TABLA: analysis_cache
 -- =================================
--- Cache de análisis para optimizar costos de API externa
+-- Cache de análisis para optimizar costos de API
 
 CREATE TABLE IF NOT EXISTS public.analysis_cache (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    ticker VARCHAR(10) NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticker TEXT NOT NULL,
     analysis_data JSONB NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    source VARCHAR(50) DEFAULT 'financial_modeling_prep' NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    source TEXT DEFAULT 'financial_modeling_prep',
     
-    -- Constraint para evitar duplicados por ticker activo
-    UNIQUE(ticker, source)
+    -- Constraint único por ticker
+    UNIQUE(ticker)
 );
 
--- Índices para optimizar consultas
+-- RLS para analysis_cache
+ALTER TABLE public.analysis_cache ENABLE ROW LEVEL SECURITY;
+
+-- Todos los usuarios autenticados pueden leer el cache
+CREATE POLICY "Authenticated users can read cache" ON public.analysis_cache
+    FOR SELECT USING (auth.role() = 'authenticated');
+
+-- Solo el sistema puede escribir en el cache
+CREATE POLICY "System can write to cache" ON public.analysis_cache
+    FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "System can update cache" ON public.analysis_cache
+    FOR UPDATE USING (true);
+
+-- Acceso público limitado para endpoints sin autenticación
+CREATE POLICY "Public limited access to cache" ON public.analysis_cache
+    FOR SELECT USING (
+        auth.role() = 'anon' AND 
+        created_at > NOW() - INTERVAL '1 hour'
+    );
+
+-- Índices
 CREATE INDEX IF NOT EXISTS idx_analysis_cache_ticker ON public.analysis_cache(ticker);
 CREATE INDEX IF NOT EXISTS idx_analysis_cache_expires_at ON public.analysis_cache(expires_at);
-CREATE INDEX IF NOT EXISTS idx_analysis_cache_source ON public.analysis_cache(source);
+CREATE INDEX IF NOT EXISTS idx_analysis_cache_created_at ON public.analysis_cache(created_at);
 
 -- Índice GIN para búsquedas en JSONB
 CREATE INDEX IF NOT EXISTS idx_analysis_cache_data ON public.analysis_cache USING GIN(analysis_data);
 
 -- =================================
--- TABLA: alerts
--- =================================
--- Almacena alertas de fraude y anomalías detectadas
-
-CREATE TABLE IF NOT EXISTS public.alerts (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    ticker VARCHAR(10) NOT NULL,
-    severity alert_severity NOT NULL,
-    indicator VARCHAR(50) NOT NULL, -- DSRI, GMI, AQI, etc.
-    value DECIMAL(10,4) NOT NULL,
-    threshold DECIMAL(10,4) NOT NULL,
-    message TEXT NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-);
-
--- Índices para optimizar consultas
-CREATE INDEX IF NOT EXISTS idx_alerts_ticker ON public.alerts(ticker);
-CREATE INDEX IF NOT EXISTS idx_alerts_severity ON public.alerts(severity);
-CREATE INDEX IF NOT EXISTS idx_alerts_indicator ON public.alerts(indicator);
-CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON public.alerts(created_at DESC);
-
--- =================================
--- TABLA: user_roles
--- =================================
--- Gestión de roles y permisos de usuarios
-
-CREATE TABLE IF NOT EXISTS public.user_roles (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
-    role user_role DEFAULT 'user' NOT NULL,
-    granted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-    granted_by UUID REFERENCES auth.users(id),
-    
-    -- Constraint para evitar roles duplicados por usuario
-    UNIQUE(user_id, role)
-);
-
--- Índices para optimizar consultas
-CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON public.user_roles(user_id);
-CREATE INDEX IF NOT EXISTS idx_user_roles_role ON public.user_roles(role);
-
--- =================================
 -- TABLA: api_usage_log
 -- =================================
--- Log de uso de APIs externas para auditoría y control de costos
+-- Log de uso de APIs para auditoría
 
 CREATE TABLE IF NOT EXISTS public.api_usage_log (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    ticker VARCHAR(10),
-    endpoint VARCHAR(100) NOT NULL,
-    api_provider VARCHAR(50) NOT NULL,
-    cost_credits INTEGER DEFAULT 1 NOT NULL,
+    ticker TEXT,
+    endpoint TEXT NOT NULL,
+    api_provider TEXT NOT NULL,
+    cost_credits INTEGER DEFAULT 1,
     response_status INTEGER,
     response_time_ms INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Índices para optimizar consultas
+-- RLS para api_usage_log
+ALTER TABLE public.api_usage_log ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view own usage logs" ON public.api_usage_log
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "System can insert usage logs" ON public.api_usage_log
+    FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Admins can view all usage logs" ON public.api_usage_log
+    FOR SELECT USING (
+        EXISTS (
+            SELECT 1 FROM public.user_roles 
+            WHERE user_id = auth.uid() AND role = 'admin'
+        )
+    );
+
+-- Índices
 CREATE INDEX IF NOT EXISTS idx_api_usage_log_user_id ON public.api_usage_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_usage_log_ticker ON public.api_usage_log(ticker);
 CREATE INDEX IF NOT EXISTS idx_api_usage_log_created_at ON public.api_usage_log(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_api_usage_log_api_provider ON public.api_usage_log(api_provider);
 
 -- =================================
 -- FUNCIONES AUXILIARES
 -- =================================
 
 -- Función para limpiar cache expirado
-CREATE OR REPLACE FUNCTION clean_expired_cache()
+CREATE OR REPLACE FUNCTION public.clean_expired_cache()
 RETURNS INTEGER AS $$
 DECLARE
     deleted_count INTEGER;
@@ -165,70 +208,97 @@ BEGIN
     GET DIAGNOSTICS deleted_count = ROW_COUNT;
     RETURN deleted_count;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Función para obtener estadísticas de uso por usuario
-CREATE OR REPLACE FUNCTION get_user_usage_stats(target_user_id UUID)
+-- Función para obtener estadísticas de usuario
+CREATE OR REPLACE FUNCTION public.get_user_stats(target_user_id UUID)
 RETURNS TABLE(
     total_searches INTEGER,
     searches_today INTEGER,
     searches_this_month INTEGER,
-    most_searched_ticker VARCHAR(10)
+    tier tier_plan,
+    portfolio_count INTEGER
 ) AS $$
 BEGIN
     RETURN QUERY
     SELECT 
-        COUNT(*)::INTEGER as total_searches,
-        COUNT(CASE WHEN DATE(created_at) = CURRENT_DATE THEN 1 END)::INTEGER as searches_today,
-        COUNT(CASE WHEN DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE) THEN 1 END)::INTEGER as searches_this_month,
+        p.search_count as total_searches,
         (
-            SELECT ticker 
+            SELECT COUNT(*)::INTEGER 
             FROM public.api_usage_log 
-            WHERE user_id = target_user_id AND ticker IS NOT NULL
-            GROUP BY ticker 
-            ORDER BY COUNT(*) DESC 
-            LIMIT 1
-        ) as most_searched_ticker
-    FROM public.api_usage_log 
-    WHERE user_id = target_user_id;
+            WHERE user_id = target_user_id 
+            AND DATE(created_at) = CURRENT_DATE
+            AND endpoint LIKE '%/analysis/%'
+        ) as searches_today,
+        (
+            SELECT COUNT(*)::INTEGER 
+            FROM public.api_usage_log 
+            WHERE user_id = target_user_id 
+            AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
+            AND endpoint LIKE '%/analysis/%'
+        ) as searches_this_month,
+        p.tier_plan as tier,
+        (
+            SELECT COUNT(*)::INTEGER 
+            FROM public.portfolio 
+            WHERE user_id = target_user_id
+        ) as portfolio_count
+    FROM public.profiles p
+    WHERE p.id = target_user_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- =================================
+-- TRIGGERS
+-- =================================
+
+-- Trigger para crear perfil automáticamente
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.profiles (id, email, display_name, tier_plan)
+    VALUES (
+        NEW.id,
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'display_name', NEW.email),
+        'free'
+    );
+    
+    -- Asignar rol de usuario por defecto
+    INSERT INTO public.user_roles (user_id, role)
+    VALUES (NEW.id, 'user');
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Crear el trigger
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Trigger para actualizar updated_at
+CREATE OR REPLACE FUNCTION public.handle_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- =================================
--- COMENTARIOS EN TABLAS
--- =================================
-
-COMMENT ON TABLE public.profiles IS 'Perfiles extendidos de usuarios con información de tier y límites de uso';
-COMMENT ON TABLE public.portfolio IS 'Carteras de activos de cada usuario';
-COMMENT ON TABLE public.analysis_cache IS 'Cache de análisis financieros para optimizar costos de API';
-COMMENT ON TABLE public.alerts IS 'Alertas de fraude y anomalías detectadas en análisis';
-COMMENT ON TABLE public.user_roles IS 'Roles y permisos de usuarios del sistema';
-COMMENT ON TABLE public.api_usage_log IS 'Log de uso de APIs externas para auditoría y control de costos';
+DROP TRIGGER IF EXISTS profiles_updated_at ON public.profiles;
+CREATE TRIGGER profiles_updated_at
+    BEFORE UPDATE ON public.profiles
+    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 
 -- =================================
--- DATOS INICIALES (OPCIONAL)
+-- COMENTARIOS
 -- =================================
 
--- Insertar sectores comunes para referencia
--- Esta tabla es opcional y puede ser útil para categorización
-CREATE TABLE IF NOT EXISTS public.sectors (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    name VARCHAR(100) UNIQUE NOT NULL,
-    description TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-);
+COMMENT ON TABLE public.profiles IS 'Perfiles extendidos de usuarios con tier y contadores';
+COMMENT ON TABLE public.portfolio IS 'Carteras de activos por usuario';
+COMMENT ON TABLE public.user_roles IS 'Roles de seguridad para control de acceso';
+COMMENT ON TABLE public.analysis_cache IS 'Cache de análisis para optimizar costos de API';
+COMMENT ON TABLE public.api_usage_log IS 'Log de uso de APIs para auditoría y facturación';
 
--- Sectores comunes del mercado
-INSERT INTO public.sectors (name, description) VALUES
-('Technology', 'Empresas de tecnología y software'),
-('Healthcare', 'Empresas farmacéuticas y de salud'),
-('Financial Services', 'Bancos, seguros y servicios financieros'),
-('Consumer Discretionary', 'Bienes de consumo no esenciales'),
-('Consumer Staples', 'Bienes de consumo esenciales'),
-('Energy', 'Empresas de petróleo, gas y energía renovable'),
-('Industrials', 'Empresas industriales y manufactureras'),
-('Materials', 'Empresas de materias primas y químicos'),
-('Real Estate', 'Empresas inmobiliarias y REITs'),
-('Utilities', 'Empresas de servicios públicos'),
-('Communication Services', 'Telecomunicaciones y medios')
-ON CONFLICT (name) DO NOTHING;
