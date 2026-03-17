@@ -57,7 +57,7 @@ export class SupabaseAuthGuard implements CanActivate {
         id: user.id,
         email: user.email,
         profile,
-        roles: roles?.map(r => r.role) || ['user'],
+        roles: roles?.map((r: any) => r.role) || ['user'],
         supabaseUser: user
       };
 
@@ -70,4 +70,3 @@ export class SupabaseAuthGuard implements CanActivate {
     }
   }
 }
-

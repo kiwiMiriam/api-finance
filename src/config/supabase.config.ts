@@ -196,9 +196,9 @@ export class SupabaseConfigService {
   private serviceClient: SupabaseClient<Database>;
 
   constructor(private configService: ConfigService) {
-    this.supabaseUrl = this.configService.get<string>('SUPABASE_URL');
-    this.supabaseAnonKey = this.configService.get<string>('SUPABASE_ANON_KEY');
-    this.supabaseServiceRoleKey = this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY');
+    this.supabaseUrl = this.configService.get<string>('SUPABASE_URL') || '';
+    this.supabaseAnonKey = this.configService.get<string>('SUPABASE_ANON_KEY') || '';
+    this.supabaseServiceRoleKey = this.configService.get<string>('SUPABASE_SERVICE_ROLE_KEY') || '';
 
     if (!this.supabaseUrl || !this.supabaseAnonKey || !this.supabaseServiceRoleKey) {
       throw new Error('Supabase configuration is missing. Please check your environment variables.');
@@ -283,4 +283,3 @@ export class SupabaseConfigService {
     };
   }
 }
-

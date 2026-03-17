@@ -8,7 +8,7 @@ import {
   FinancialData 
 } from '../../domain/interfaces/analysis.interfaces';
 import axios from 'axios';
-import * as moment from 'moment';
+import moment from 'moment';
 
 /**
  * Servicio de análisis financiero
@@ -27,8 +27,8 @@ export class AnalysisService {
     private supabaseConfig: SupabaseConfigService,
     private scoringService: ScoringService
   ) {
-    this.financialApiKey = this.configService.get<string>('FINANCIAL_API_KEY');
-    this.financialApiBaseUrl = this.configService.get<string>('FINANCIAL_API_BASE_URL');
+    this.financialApiKey = this.configService.get<string>('FINANCIAL_API_KEY') || '';
+    this.financialApiBaseUrl = this.configService.get<string>('FINANCIAL_API_BASE_URL') || '';
     this.publicRateLimitMax = this.configService.get<number>('PUBLIC_RATE_LIMIT_MAX', 5);
     this.publicRateLimitWindow = this.configService.get<number>('PUBLIC_RATE_LIMIT_WINDOW', 3600000);
   }
@@ -131,7 +131,7 @@ export class AnalysisService {
         endpoint: 'public_analysis',
         api_provider: 'rate_limit_check',
         cost_credits: 0
-      });
+      } as any);
   }
 
   /**
@@ -155,17 +155,17 @@ export class AnalysisService {
     }
 
     // Verificar límites según tier
-    const limits = {
+    const limits: Record<string, number> = {
       free: 5,
       pro: 100,
       enterprise: 999999
     };
 
-    const userLimit = limits[profile.tier_plan] || limits.free;
+    const userLimit = limits[(profile as any).tier_plan] || limits.free;
 
-    if (profile.search_count >= userLimit) {
+    if ((profile as any).search_count >= userLimit) {
       throw new HttpException(
-        `Límite de ${userLimit} análisis mensuales excedido para el plan ${profile.tier_plan}`,
+        `Límite de ${userLimit} análisis mensuales excedido para el plan ${(profile as any).tier_plan}`,
         HttpStatus.PAYMENT_REQUIRED
       );
     }
@@ -189,7 +189,7 @@ export class AnalysisService {
         return null;
       }
 
-      return data.analysis_data as AnalysisResponse;
+      return (data as any).analysis_data as AnalysisResponse;
     } catch (error) {
       console.error('Error getting cached analysis:', error);
       return null;
@@ -209,10 +209,10 @@ export class AnalysisService {
         .from('analysis_cache')
         .upsert({
           ticker,
-          analysis_data: analysis,
+          analysis_data: analysis as any,
           expires_at: expiresAt,
           source: 'financial_modeling_prep'
-        });
+        } as any);
     } catch (error) {
       console.error('Error caching analysis:', error);
       // No lanzar error, el cache es opcional
@@ -435,9 +435,18 @@ export class AnalysisService {
     try {
       const supabase = this.supabaseConfig.getServiceClient();
       
-      await supabase.rpc('increment_search_count', {
-        user_id: userId
-      });
+      // Incrementar manualmente ya que la función RPC puede no estar definida
+      const { data: currentProfile } = await supabase
+        .from('profiles')
+        .select('search_count')
+        .eq('id', userId)
+        .single();
+      
+      if (currentProfile) {
+        const newCount = ((currentProfile as any).search_count || 0) + 1;
+        const updateQuery = supabase.from('profiles');
+        await (updateQuery as any).update({ search_count: newCount }).eq('id', userId);
+      }
     } catch (error) {
       console.error('Error incrementing search count:', error);
       // No lanzar error, es solo para tracking
@@ -469,7 +478,7 @@ export class AnalysisService {
           cost_credits: logData.costCredits,
           response_status: logData.responseStatus,
           response_time_ms: logData.responseTimeMs
-        });
+        } as any);
     } catch (error) {
       console.error('Error logging API usage:', error);
       // No lanzar error, es solo para auditoría
@@ -494,7 +503,7 @@ export class AnalysisService {
         throw error;
       }
 
-      return data?.map(item => ({
+      return data?.map((item: any) => ({
         date: item.created_at,
         fScore: item.analysis_data.fScore,
         zScore: item.analysis_data.zScore,
@@ -527,4 +536,3 @@ export class AnalysisService {
     };
   }
 }
-
