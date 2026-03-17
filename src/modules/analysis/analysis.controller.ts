@@ -14,8 +14,8 @@ import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/s
 import { AnalysisService } from './analysis.service';
 import { SupabaseAuthGuard } from '../../common/guards/supabase-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
-import { CurrentUser, AuthenticatedUser } from '../../common/decorators/user.decorator';
-import { AnalysisResponse, ManualAnalysisRequest } from '../../domain/interfaces/analysis.interfaces';
+import { CurrentUser, type AuthenticatedUser } from '../../common/decorators/user.decorator';
+import type { AnalysisResponse, ManualAnalysisRequest } from '../../domain/interfaces/analysis.interfaces';
 
 /**
  * Controlador de análisis financiero
@@ -46,8 +46,7 @@ export class AnalysisController {
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Análisis completado exitosamente',
-    type: AnalysisResponse
+    description: 'Análisis completado exitosamente'
   })
   @ApiResponse({ 
     status: 429, 
@@ -120,13 +119,11 @@ export class AnalysisController {
     description: 'Permite analizar empresas privadas o datos personalizados proporcionando estados financieros'
   })
   @ApiBody({ 
-    type: ManualAnalysisRequest,
     description: 'Datos financieros mínimos requeridos para el análisis'
   })
   @ApiResponse({ 
     status: 200, 
-    description: 'Análisis manual completado exitosamente',
-    type: AnalysisResponse
+    description: 'Análisis manual completado exitosamente'
   })
   @ApiResponse({ 
     status: 401, 
@@ -283,4 +280,3 @@ export class AnalysisController {
     }
   }
 }
-

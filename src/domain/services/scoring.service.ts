@@ -136,7 +136,7 @@ export class ScoringService {
       ALTMAN_COEFFICIENTS.MANUFACTURING : 
       ALTMAN_COEFFICIENTS.NON_MANUFACTURING;
 
-    const components = [];
+    const components: any[] = [];
     let totalScore = 0;
 
     // X1: Working Capital / Total Assets
@@ -228,7 +228,7 @@ export class ScoringService {
    * Calcular Beneish M-Score
    */
   calculateBeneishMScore(data: FinancialData, priorData?: FinancialData): BeneishMScore {
-    const variables = [];
+    const variables: any[] = [];
 
     if (!priorData) {
       // Si no hay datos del año anterior, retornar score neutro
@@ -586,4 +586,3 @@ export class ScoringService {
     return explanation;
   }
 }
-
